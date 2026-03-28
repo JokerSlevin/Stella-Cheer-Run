@@ -108,7 +108,9 @@ const ML=[523,659,784,880,784,659,523,440,523,659,784,880,1046,880,784,659];
 const BS=[262,0,196,0,220,0,262,0,262,0,196,0,175,0,196,0];
 function bgmScheduleBar(){
   if(!bgmRunning||!AC) return;
-  const t=bgmNext;
+  // Never schedule in the past
+  const t=Math.max(bgmNext, AC.currentTime+0.05);
+  bgmNext=t;
   ML.forEach((f,i)=>{if(f)tone(f,ND*.6,'triangle',.08,t-AC.currentTime+i*ND);});
   BS.forEach((f,i)=>{if(f)tone(f,ND*.45,'square',.05,t-AC.currentTime+i*ND);});
   [0,4,8,12].forEach(i=>drum(85,ND*.3,t-AC.currentTime+i*ND));
@@ -121,19 +123,17 @@ function bgmStart(){
   if(bgmRunning||!AC)return;
   bgmRunning=true;
   bgmNext=AC.currentTime+0.1;
-  // Fade in master gain
   masterGain.gain.cancelScheduledValues(AC.currentTime);
   masterGain.gain.setValueAtTime(0,AC.currentTime);
-  masterGain.gain.linearRampToValueAtTime(1,AC.currentTime+0.3);
+  masterGain.gain.linearRampToValueAtTime(1,AC.currentTime+0.25);
   bgmScheduleBar();
 }
 function bgmStop(){
   bgmRunning=false;
   if(bgmT){clearTimeout(bgmT);bgmT=null;}
-  // Fade out so lingering notes don't overlap on restart
   if(AC&&masterGain){
     masterGain.gain.cancelScheduledValues(AC.currentTime);
-    masterGain.gain.setValueAtTime(masterGain.gain.value,AC.currentTime);
+    masterGain.gain.setValueAtTime(1,AC.currentTime);
     masterGain.gain.linearRampToValueAtTime(0,AC.currentTime+0.2);
   }
 }
@@ -205,7 +205,7 @@ function initGame(){
   if(inv.life>0){inv.life--;player.hasLife=true;}
   saveInv();
   worldObjs=[]; particles=[]; floatTxts=[];
-  genFrontier=0; segCounter=0;
+  genFrontier=0; segCounter=0; jumpReleased=true;
   generateWorld(0, cv.width*3);
 }
 
@@ -463,7 +463,7 @@ function update(){
           addFloat('+⭐',  '#ffd700',17*S,isx,isy-10*S);
         } else {
           sfxSpecial();
-          const lbl={shield:'🛡️ Schild!',magnet:'🧲 Magnet!',x2:'⚡ x2 Score!'}[o.stype]||'Power!';
+          const lbl={shield:'SCHILD!',magnet:'MAGNET!',x2:'x2 Score!'}[o.stype]||'Power!';
           addFloat(lbl,'#c084fc',16*S,isx,isy-14*S);
           burst(isx,isy,['#c084fc','#ffd700','#fff','#38bdf8'],18,1.3);
           if(o.stype==='shield') p.shielded=true;
@@ -607,17 +607,36 @@ function drawWorld(){
     else if(o.type==='special'){
       o.pulse=(o.pulse||0)+.1;
       const bob=Math.sin(o.pulse)*3*S;
-      const pc={'shield':'#38bdf8','magnet':'#818cf8','x2':'#fb923c'}[o.stype]||'#c084fc';
-      const ic={'shield':'🛡️','magnet':'🧲','x2':'⚡'}[o.stype]||'❓';
+      const pc={'shield':'#38bdf8','magnet':'#ff6b6b','x2':'#fb923c'}[o.stype]||'#c084fc';
       cx.save(); cx.translate(sx,o.y+bob);
+      // Box
       const gr=cx.createLinearGradient(-18*S,-18*S,18*S,18*S);
       gr.addColorStop(0,'#fff'); gr.addColorStop(1,pc);
       cx.fillStyle=gr; cx.shadowColor=pc; cx.shadowBlur=14*S;
       cx.beginPath(); cx.roundRect(-18*S,-18*S,36*S,36*S,8*S); cx.fill();
       cx.shadowBlur=0; cx.strokeStyle=pc; cx.lineWidth=2*S;
       cx.beginPath(); cx.roundRect(-18*S,-18*S,36*S,36*S,8*S); cx.stroke();
-      cx.font=`${20*S}px Arial`; cx.textAlign='center'; cx.textBaseline='middle';
-      cx.fillText(ic,0,2*S); cx.restore();
+      // Icon drawn (no emoji)
+      cx.lineWidth=2.5*S; cx.lineCap='round'; cx.lineJoin='round';
+      if(o.stype==='shield'){
+        cx.fillStyle=pc; cx.beginPath();
+        cx.moveTo(0,-9*S); cx.lineTo(9*S,-5*S); cx.lineTo(9*S,2*S);
+        cx.quadraticCurveTo(9*S,9*S,0,12*S);
+        cx.quadraticCurveTo(-9*S,9*S,-9*S,2*S); cx.lineTo(-9*S,-5*S);
+        cx.closePath(); cx.fill();
+        cx.strokeStyle='#fff'; cx.lineWidth=2*S;
+        cx.beginPath(); cx.moveTo(-4*S,0); cx.lineTo(-1*S,4*S); cx.lineTo(5*S,-4*S); cx.stroke();
+      } else if(o.stype==='magnet'){
+        cx.strokeStyle='#888'; cx.lineWidth=4*S;
+        cx.beginPath(); cx.arc(0,-1*S,7*S,Math.PI,0,false); cx.stroke();
+        cx.strokeStyle='#ef4444'; cx.beginPath(); cx.moveTo(-7*S,-1*S); cx.lineTo(-7*S,7*S); cx.stroke();
+        cx.strokeStyle='#3b82f6'; cx.beginPath(); cx.moveTo(7*S,-1*S); cx.lineTo(7*S,7*S); cx.stroke();
+      } else if(o.stype==='x2'){
+        cx.fillStyle='#fff'; cx.font=`bold ${14*S}px Arial`;
+        cx.textAlign='center'; cx.textBaseline='middle';
+        cx.fillText('x2',0,1*S);
+      }
+      cx.restore();
     }
   });
 }
@@ -714,9 +733,9 @@ function drawHUD(){
 
   // Active powerups
   let px2=8*S;
-  if(p.shielded){ drawPill(px2,56*S,'🛡️','#38bdf8'); px2+=52*S; }
-  if(p.magnet){   drawPill(px2,56*S,'🧲','#818cf8'); px2+=52*S; }
-  if(p.scoreMulti>1){ drawPill(px2,56*S,'⚡x2','#fb923c'); }
+  if(p.shielded){ drawPill(px2,56*S,'SCHILD','#38bdf8'); px2+=58*S; }
+  if(p.magnet){   drawPill(px2,56*S,'MAGNET','#818cf8'); px2+=58*S; }
+  if(p.scoreMulti>1){ drawPill(px2,56*S,'x2','#fb923c'); }
   // Controls hint early
   if(frame<240){
     cx.globalAlpha=Math.max(0,1-frame/240);
